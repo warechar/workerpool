@@ -1,59 +1,38 @@
 package main
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
 func main() {
+	wp := New(5)
 
-	//q := deque.New[int]()
+	requests := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
 	//
-	//ch := make(chan int)
-	//
-	//go func() {
-	//
-	//	for {
-	//		fmt.Println(q)
-	//		select {
-	//		case ch <- q.Pop():
-	//			//if q.Front() != 0 {
-	//			//	q.Pop()
-	//			//}
-	//		}
+	//for i, r := range requests {
+	//	r := r
+	//	if i%2 == 0 {
+	//		wp.Submit(HandlerFunc{
+	//			F: func() {
+	//				fmt.Println("i是", r)
+	//			},
+	//			Delay: time.NewTicker(1 * time.Second),
+	//		})
+	//	} else {
+	//		wp.Submit(HandlerFunc{
+	//			F: func() {
+	//				fmt.Println("i是", r)
+	//			},
+	//			Delay: time.NewTicker(2 * time.Second),
+	//		})
 	//	}
-	//}()
-	//
-	//go func() {
-	//Lo:
-	//	for {
-	//		select {
-	//		case i := <-ch:
-	//			if i == 0 {
-	//				break Lo
-	//			}
-	//			fmt.Println("输出", i)
-	//		default:
-	//
-	//		}
-	//	}
-	//}()
-	//
-	//for i := 1; i <= 10; i++ {
-	//	q.Push(i)
 	//}
-	//
-	//time.Sleep(5 * time.Second)
-	//
-	//os.Exit(1)
 
-	pool := New(1)
-
-	for i := 1; i <= 5; i++ {
-		pool.Submit(i)
+	//
+	for _, r := range requests {
+		r := r
+		wp.Submit(func() {
+			fmt.Println("Handling request:", r)
+		})
 	}
 
-	time.Sleep(4 * time.Second)
-	//pool.StopWait()
-	fmt.Printf("结束main")
+	wp.StopWait()
 }

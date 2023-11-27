@@ -2,18 +2,28 @@ package main
 
 import (
 	"fmt"
-	"strconv"
+	"reflect"
 	"sync"
+	"time"
 	"workerpool/deque"
 )
 
+type AdaptorType interface{}
+
+// TODO fix
+type HandlerFunc struct {
+	F     func()
+	Delay *time.Ticker
+}
+
 type WorkerPool struct {
-	taskQueue    chan int
-	workerQueue  chan int
-	maxWorkers   int
-	waiting      int32
-	waitingQueue *deque.Deque[int]
-	stopCh       chan struct{}
+	taskQueue         chan AdaptorType
+	workerQueue       chan AdaptorType
+	maxWorkers        int
+	waiting           int32
+	waitingQueue      *deque.Deque[AdaptorType]
+	waitingDelayQueue *deque.Deque[AdaptorType]
+	stopCh            chan struct{}
 }
 
 func New(maxWorkers int) *WorkerPool {
@@ -22,11 +32,12 @@ func New(maxWorkers int) *WorkerPool {
 	}
 
 	pool := &WorkerPool{
-		taskQueue:    make(chan int),
-		workerQueue:  make(chan int),
-		stopCh:       make(chan struct{}),
-		maxWorkers:   maxWorkers,
-		waitingQueue: deque.New[int](),
+		taskQueue:         make(chan AdaptorType),
+		workerQueue:       make(chan AdaptorType),
+		stopCh:            make(chan struct{}),
+		maxWorkers:        maxWorkers,
+		waitingQueue:      deque.New[AdaptorType](),
+		waitingDelayQueue: deque.New[AdaptorType](),
 	}
 
 	go pool.distributor()
@@ -39,8 +50,8 @@ func (pool *WorkerPool) Size() int {
 }
 
 // Submit submit task to taskQueue
-func (pool *WorkerPool) Submit(task int) {
-	if task == 0 {
+func (pool *WorkerPool) Submit(task AdaptorType) {
+	if isNil(task) {
 		return
 	}
 
@@ -57,8 +68,15 @@ Loop:
 	for {
 		// The waitingQueue is processed first
 		if pool.waitingQueue.Len() != 0 {
-			fmt.Println(pool.waitingQueue, "pool.waitingQueue.Len()"+strconv.Itoa(pool.waitingQueue.Len()))
 			if !pool.waitingForQueue() {
+				break Loop
+			}
+
+			continue
+		}
+
+		if pool.waitingDelayQueue.Len() != 0 {
+			if !pool.waitingForQueue1() {
 				break Loop
 			}
 
@@ -68,7 +86,6 @@ Loop:
 		select {
 		case task, ok := <-pool.taskQueue:
 			if !ok {
-				fmt.Println("没有东西运行")
 				break Loop
 			}
 
@@ -77,14 +94,24 @@ Loop:
 			default:
 				if workerCount < pool.maxWorkers {
 					wg.Add(1)
-					go pool.worker(task, pool.workerQueue, &wg)
+					go pool.worker(task, &wg)
 					workerCount++
 				} else {
-					fmt.Println(task, "插入一个task到队列中")
 					pool.waitingQueue.Push(task)
 				}
 			}
 		}
+	}
+
+	for pool.waitingQueue.Len() != 0 {
+		pool.workerQueue <- pool.waitingQueue.Front()
+		pool.waitingQueue.Pop()
+	}
+
+	// dec workerCount when task is nil, worker exit
+	for workerCount > 0 {
+		pool.workerQueue <- nil
+		workerCount--
 	}
 
 	wg.Wait()
@@ -99,32 +126,92 @@ func (pool *WorkerPool) StopWait() {
 }
 
 func (pool *WorkerPool) waitingForQueue() bool {
-
 	select {
 	// There are new tasks, rest assured queue
 	case task, ok := <-pool.taskQueue:
 		if !ok {
 			return false
 		}
-
-		fmt.Println("重新插入到wait", task)
-		pool.waitingQueue.Push(task)
-		//case pool.workerQueue <- pool.waitingQueue.Front():
-	case pool.workerQueue <- pool.waitingQueue.Pop():
-
-		//fmt.Println("waitingForQueue推送一个pop过去" + strconv.Itoa(pool.waitingQueue.Pop()))
-		fmt.Println("waitingForQueue推送一个pop过去")
+		if t, ok := task.(HandlerFunc); ok {
+			pool.waitingDelayQueue.Push(t)
+		} else {
+			pool.waitingQueue.Push(task)
+		}
+	// cannot pop directly to prevent data loss due to workerQueue blocking after pop because workerQueue would block
+	case pool.workerQueue <- pool.waitingQueue.Front():
+		pool.waitingQueue.Pop()
 	}
 
-	//atomic.StoreInt32(&pool.waiting, int32(pool.waitingQueue.Len()))
 	return true
 }
 
-func (pool *WorkerPool) worker(task int, workerQueue chan int, wg *sync.WaitGroup) {
-	for task != 0 {
-		fmt.Println("这里是worker输出" + strconv.Itoa(task))
-		task = <-workerQueue
+func (pool *WorkerPool) waitingForQueue1() bool {
+	select {
+	// There are new tasks, rest assured queue
+	case task, ok := <-pool.taskQueue:
+		if !ok {
+			return false
+		}
+		if t, ok := task.(HandlerFunc); ok {
+			pool.waitingDelayQueue.Push(t)
+		} else {
+			pool.waitingQueue.Push(task)
+		}
+	// cannot pop directly to prevent data loss due to workerQueue blocking after pop because workerQueue would block
+	case pool.workerQueue <- pool.waitingDelayQueue.Front():
+		fmt.Println("?????????")
+		pool.waitingDelayQueue.Pop()
+	}
+
+	return true
+}
+
+// worker work to func or etc...
+func (pool *WorkerPool) worker(task AdaptorType, wg *sync.WaitGroup) {
+	for !isNil(task) {
+		if fc, ok := task.(func()); ok {
+			fc()
+		}
+
+		if fc, ok := task.(HandlerFunc); ok {
+			fc.F()
+		}
+		task = <-pool.workerQueue
 	}
 
 	wg.Done()
+}
+
+/**
+Determine whether it is nil
+*/
+func isNil(task AdaptorType) bool {
+	switch task.(type) {
+	case HandlerFunc:
+		if task == nil {
+			return true
+		}
+
+		v := reflect.ValueOf(task)
+		st := v.Interface().(HandlerFunc)
+		if st.F == nil {
+			return true
+		}
+	case int:
+		if task == 0 {
+			return true
+		}
+	case func():
+		if task == nil {
+			return true
+		}
+	case string:
+		if task == "" {
+			return true
+		}
+	default:
+		return true
+	}
+
+	return false
 }

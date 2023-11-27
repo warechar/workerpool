@@ -1,10 +1,5 @@
 package deque
 
-import (
-	"fmt"
-	"sync"
-)
-
 // 2^k  x % n == x & (n - 1)
 const minCapacity = 8
 
@@ -22,14 +17,12 @@ type Deque[T any] struct {
 	tail  int
 	count int
 	cap   int
-	mux   sync.Mutex
 }
 
 func New[T any]() *Deque[T] {
 	return &Deque[T]{
 		buf: make([]T, minCapacity),
 		cap: minCapacity,
-		mux: sync.Mutex{},
 	}
 }
 
@@ -42,21 +35,17 @@ func (d *Deque[T]) Cap() int {
 }
 
 func (d *Deque[T]) Push(elem T) {
-	d.mux.Lock()
 	d.ifFull()
 
 	d.buf[d.tail] = elem
 	d.tail = next(d.tail, d.Cap())
 	d.count++
-	d.mux.Unlock()
 }
 
 func (d *Deque[T]) Pop() T {
-
 	if d.count <= 0 {
 		panic("deque: Pop() called on empty queue")
 	}
-	d.mux.Lock()
 	var null T
 	ret := d.buf[d.head]
 	d.buf[d.head] = null
@@ -64,8 +53,6 @@ func (d *Deque[T]) Pop() T {
 	d.count--
 
 	d.ifCompress()
-	fmt.Println(ret)
-	d.mux.Unlock()
 	return ret
 }
 
