@@ -1,9 +1,24 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func main() {
-	wp := New(5)
+
+	//r := []int{1, 4, 7, 2, 8, 9, 3, 10, 2, 6}
+	////r := []int{1, 4, 7, 2, 8, 9, 3, 10, 2}
+	//seq := deque.NewSeq[HandlerFunc]()
+	//for k, i := range r {
+	//
+	//	seq.Push(HandlerFunc{T: int32(i), Delay: time.Now().Add(time.Duration(i) * time.Second)}, 0, k-1)
+	//	fmt.Println(seq)
+	//	fmt.Println("===============")
+	//}
+	//
+	//os.Exit(0)
+
+	wp := New(1)
 
 	requests := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
 	//

@@ -10,10 +10,18 @@ import (
 
 type AdaptorType interface{}
 
-// TODO fix
 type HandlerFunc struct {
 	F     func()
-	Delay *time.Ticker
+	Delay time.Time
+	T     int32
+}
+
+func (hf HandlerFunc) Get() int32 {
+	return hf.T
+}
+
+func (hf HandlerFunc) Compare(T any) bool {
+	return hf.Delay.Sub(reflect.ValueOf(T).Interface().(HandlerFunc).Delay) < 0
 }
 
 type WorkerPool struct {
