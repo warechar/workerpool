@@ -2,12 +2,12 @@ package deque
 
 import "fmt"
 
-type Seq[T any] interface {
-	Get() int32
+type TimerInterface[T any] interface {
+	Get() any
 	Compare(T) bool
 }
 
-type DequeSeq[T Seq[any]] struct {
+type DequeTimer[T TimerInterface[T]] struct {
 	buf   []T
 	head  int
 	tail  int
@@ -15,25 +15,24 @@ type DequeSeq[T Seq[any]] struct {
 	cap   int
 }
 
-func NewSeq[T Seq[any]]() *DequeSeq[T] {
-	return &DequeSeq[T]{
+func NewSeq[T TimerInterface[T]]() *DequeTimer[T] {
+	return &DequeTimer[T]{
 		buf: make([]T, minCapacity),
 		cap: minCapacity,
 	}
 }
 
-func (d *DequeSeq[T]) Len() int {
+func (d *DequeTimer[T]) Len() int {
 	return d.count
 }
 
-func (d *DequeSeq[T]) Cap() int {
+func (d *DequeTimer[T]) Cap() int {
 	return len(d.buf)
 }
 
-func (d *DequeSeq[T]) Push(elem T, leftIdx, rightIdx int) {
+func (d *DequeTimer[T]) Push(elem T, leftIdx, rightIdx int) {
 
 	d.ifFull()
-	fmt.Println(cap(d.buf))
 
 	if d.count == 0 {
 		d.buf[d.tail] = elem
@@ -67,7 +66,6 @@ func (d *DequeSeq[T]) Push(elem T, leftIdx, rightIdx int) {
 	}
 
 	if (rightIdx-leftIdx) == 1 && d.buf[leftIdx].Compare(elem) && !d.buf[rightIdx].Compare(elem) {
-		fmt.Println(leftIdx, rightIdx)
 		newb := make([]T, cap(d.buf))
 		copy(newb, d.buf[:leftIdx+1])
 		newb[leftIdx+1] = elem
@@ -91,7 +89,7 @@ func (d *DequeSeq[T]) Push(elem T, leftIdx, rightIdx int) {
 	}
 }
 
-func (d *DequeSeq[T]) Pop() T {
+func (d *DequeTimer[T]) Pop() T {
 	if d.count <= 0 {
 		panic("deque: Pop() called on empty queue")
 	}
@@ -105,8 +103,8 @@ func (d *DequeSeq[T]) Pop() T {
 	return ret
 }
 
-func (d *DequeSeq[T]) ifFull() {
-	fmt.Println(d.count, cap(d.buf))
+func (d *DequeTimer[T]) ifFull() {
+
 	if d.count != cap(d.buf) {
 		return
 	}
@@ -123,14 +121,14 @@ func (d *DequeSeq[T]) ifFull() {
 }
 
 // pop后判断容量是否合适，如果过大则进行压缩
-func (d *DequeSeq[T]) ifCompress() {
+func (d *DequeTimer[T]) ifCompress() {
 	if d.Cap() > d.cap && d.count<<2 == d.Cap() {
 		d.resize()
 	}
 }
 
 // 只有full 或者 count = 1/4的时候触发
-func (d *DequeSeq[T]) resize() {
+func (d *DequeTimer[T]) resize() {
 
 	newBuf := make([]T, d.count<<1)
 
@@ -146,18 +144,14 @@ func (d *DequeSeq[T]) resize() {
 	d.buf = newBuf
 }
 
-func (d *DequeSeq[T]) Front() T {
+func (d *DequeTimer[T]) Front() T {
 	return d.buf[d.head]
 }
 
-func (d *DequeSeq[T]) GetHead() int {
+func (d *DequeTimer[T]) GetHead() int {
 	return d.head
 }
 
-func (d *DequeSeq[T]) GetTail() int {
+func (d *DequeTimer[T]) GetTail() int {
 	return d.tail
-}
-
-func (d *DequeSeq[T]) G() int {
-	return cap(d.buf)
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -13,15 +12,15 @@ type AdaptorType interface{}
 type HandlerFunc struct {
 	F     func()
 	Delay time.Time
-	T     int32
+	T     int
 }
 
-func (hf HandlerFunc) Get() int32 {
-	return hf.T
+func (hf HandlerFunc) Get() any {
+	return hf.Delay
 }
 
-func (hf HandlerFunc) Compare(T any) bool {
-	return hf.Delay.Sub(reflect.ValueOf(T).Interface().(HandlerFunc).Delay) < 0
+func (hf HandlerFunc) Compare(handlerFunc HandlerFunc) bool {
+	return hf.Delay.Sub(handlerFunc.Delay) < 0
 }
 
 type WorkerPool struct {
@@ -30,7 +29,7 @@ type WorkerPool struct {
 	maxWorkers        int
 	waiting           int32
 	waitingQueue      *deque.Deque[AdaptorType]
-	waitingDelayQueue *deque.Deque[AdaptorType]
+	waitingDelayQueue *deque.DequeTimer[HandlerFunc]
 	stopCh            chan struct{}
 }
 
@@ -45,7 +44,7 @@ func New(maxWorkers int) *WorkerPool {
 		stopCh:            make(chan struct{}),
 		maxWorkers:        maxWorkers,
 		waitingQueue:      deque.New[AdaptorType](),
-		waitingDelayQueue: deque.New[AdaptorType](),
+		waitingDelayQueue: deque.NewSeq[HandlerFunc](),
 	}
 
 	go pool.distributor()
@@ -77,14 +76,6 @@ Loop:
 		// The waitingQueue is processed first
 		if pool.waitingQueue.Len() != 0 {
 			if !pool.waitingForQueue() {
-				break Loop
-			}
-
-			continue
-		}
-
-		if pool.waitingDelayQueue.Len() != 0 {
-			if !pool.waitingForQueue1() {
 				break Loop
 			}
 
@@ -140,35 +131,11 @@ func (pool *WorkerPool) waitingForQueue() bool {
 		if !ok {
 			return false
 		}
-		if t, ok := task.(HandlerFunc); ok {
-			pool.waitingDelayQueue.Push(t)
-		} else {
-			pool.waitingQueue.Push(task)
-		}
+
+		pool.waitingQueue.Push(task)
 	// cannot pop directly to prevent data loss due to workerQueue blocking after pop because workerQueue would block
 	case pool.workerQueue <- pool.waitingQueue.Front():
 		pool.waitingQueue.Pop()
-	}
-
-	return true
-}
-
-func (pool *WorkerPool) waitingForQueue1() bool {
-	select {
-	// There are new tasks, rest assured queue
-	case task, ok := <-pool.taskQueue:
-		if !ok {
-			return false
-		}
-		if t, ok := task.(HandlerFunc); ok {
-			pool.waitingDelayQueue.Push(t)
-		} else {
-			pool.waitingQueue.Push(task)
-		}
-	// cannot pop directly to prevent data loss due to workerQueue blocking after pop because workerQueue would block
-	case pool.workerQueue <- pool.waitingDelayQueue.Front():
-		fmt.Println("?????????")
-		pool.waitingDelayQueue.Pop()
 	}
 
 	return true
