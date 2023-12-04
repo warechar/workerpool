@@ -1,7 +1,5 @@
 package deque
 
-import "fmt"
-
 type TimerInterface[T any] interface {
 	Get() any
 	Compare(T) bool
@@ -15,7 +13,7 @@ type DequeTimer[T TimerInterface[T]] struct {
 	cap   int
 }
 
-func NewSeq[T TimerInterface[T]]() *DequeTimer[T] {
+func NewTimer[T TimerInterface[T]]() *DequeTimer[T] {
 	return &DequeTimer[T]{
 		buf: make([]T, minCapacity),
 		cap: minCapacity,
@@ -45,7 +43,6 @@ func (d *DequeTimer[T]) Push(elem T, leftIdx, rightIdx int) {
 	if !d.buf[leftIdx].Compare(elem) {
 		// 插入最左边
 		if leftIdx == 0 {
-			fmt.Println(cap(d.buf))
 			newBuf := make([]T, cap(d.buf))
 			newBuf[0] = elem
 			copy(newBuf[d.head+1:], d.buf[:d.tail])

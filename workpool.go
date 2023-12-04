@@ -23,14 +23,21 @@ func (hf HandlerFunc) Compare(handlerFunc HandlerFunc) bool {
 	return hf.Delay.Sub(handlerFunc.Delay) < 0
 }
 
-type WorkerPool struct {
-	taskQueue         chan AdaptorType
-	workerQueue       chan AdaptorType
-	maxWorkers        int
-	waiting           int32
-	waitingQueue      *deque.Deque[AdaptorType]
+type workerTimer struct {
+	workerTimerQueue  chan HandlerFunc
 	waitingDelayQueue *deque.DequeTimer[HandlerFunc]
-	stopCh            chan struct{}
+	waitTimerChan     chan struct{}
+	stopWaitChan      chan struct{}
+}
+
+type WorkerPool struct {
+	taskQueue    chan AdaptorType
+	workerQueue  chan AdaptorType
+	maxWorkers   int
+	waitingQueue *deque.Deque[AdaptorType]
+	stopCh       chan struct{}
+
+	workerTimer
 }
 
 func New(maxWorkers int) *WorkerPool {
@@ -39,15 +46,23 @@ func New(maxWorkers int) *WorkerPool {
 	}
 
 	pool := &WorkerPool{
-		taskQueue:         make(chan AdaptorType),
-		workerQueue:       make(chan AdaptorType),
-		stopCh:            make(chan struct{}),
-		maxWorkers:        maxWorkers,
-		waitingQueue:      deque.New[AdaptorType](),
-		waitingDelayQueue: deque.NewSeq[HandlerFunc](),
+		taskQueue:   make(chan AdaptorType),
+		workerQueue: make(chan AdaptorType),
+		stopCh:      make(chan struct{}),
+
+		maxWorkers:   maxWorkers,
+		waitingQueue: deque.New[AdaptorType](),
+
+		workerTimer: workerTimer{
+			workerTimerQueue:  make(chan HandlerFunc),
+			waitingDelayQueue: deque.NewTimer[HandlerFunc](),
+			waitTimerChan:     make(chan struct{}),
+			stopWaitChan:      make(chan struct{}),
+		},
 	}
 
 	go pool.distributor()
+	go pool.distributorDelay()
 
 	return pool
 }
@@ -62,7 +77,65 @@ func (pool *WorkerPool) Submit(task AdaptorType) {
 		return
 	}
 
-	pool.taskQueue <- task
+	if t, ok := task.(HandlerFunc); ok {
+
+		pool.waitingDelayQueue.Push(t, pool.waitingDelayQueue.GetHead(), pool.waitingDelayQueue.GetTail()-1)
+		//pool.waitTimerChan <- struct{}{}
+	} else {
+		pool.taskQueue <- task
+	}
+}
+
+func (pool *WorkerPool) distributorDelay() {
+	defer func() {
+		//close(pool.waitTimerChan)
+		close(pool.stopWaitChan)
+	}()
+
+	var workerCount int
+	var wg sync.WaitGroup
+
+Loop:
+	for {
+		if pool.waitingDelayQueue.Len() == 0 {
+			_, ok := <-pool.waitTimerChan
+			if !ok {
+				break Loop
+			}
+			continue
+		}
+
+		task := pool.waitingDelayQueue.Front()
+
+		if isNil(task) {
+			break Loop
+		}
+
+		select {
+		case pool.workerTimerQueue <- pool.waitingDelayQueue.Pop():
+		default:
+			if workerCount < pool.maxWorkers {
+				wg.Add(1)
+				go pool.workerDelay(task, &wg)
+				workerCount++
+			} else {
+				pool.waitingDelayQueue.Push(task, pool.waitingDelayQueue.GetHead(), pool.waitingDelayQueue.GetTail()-1)
+
+			}
+		}
+	}
+
+	for pool.waitingDelayQueue.Len() != 0 {
+		pool.workerTimerQueue <- pool.waitingDelayQueue.Front()
+		pool.waitingDelayQueue.Pop()
+	}
+
+	for workerCount > 0 {
+		pool.workerTimerQueue <- HandlerFunc{}
+		workerCount--
+	}
+
+	wg.Wait()
 }
 
 func (pool *WorkerPool) distributor() {
@@ -120,8 +193,10 @@ func (pool *WorkerPool) StopWait() {
 	once := sync.Once{}
 	once.Do(func() {
 		close(pool.taskQueue)
+		close(pool.waitTimerChan)
 	})
 	<-pool.stopCh
+	<-pool.stopWaitChan
 }
 
 func (pool *WorkerPool) waitingForQueue() bool {
@@ -141,6 +216,22 @@ func (pool *WorkerPool) waitingForQueue() bool {
 	return true
 }
 
+func (pool *WorkerPool) workerDelay(task HandlerFunc, wg *sync.WaitGroup) {
+	for !isNil(task) {
+		for {
+			now := time.Now()
+			if task.Delay.Before(now) {
+				task.F()
+				break
+			}
+		}
+
+		task = <-pool.workerTimerQueue
+	}
+
+	wg.Done()
+}
+
 // worker work to func or etc...
 func (pool *WorkerPool) worker(task AdaptorType, wg *sync.WaitGroup) {
 	for !isNil(task) {
@@ -148,9 +239,6 @@ func (pool *WorkerPool) worker(task AdaptorType, wg *sync.WaitGroup) {
 			fc()
 		}
 
-		if fc, ok := task.(HandlerFunc); ok {
-			fc.F()
-		}
 		task = <-pool.workerQueue
 	}
 
